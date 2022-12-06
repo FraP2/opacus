@@ -466,7 +466,7 @@ class PrivacyEngine:
         data_loader: DataLoader,
         target_epsilon: float,
         target_delta: float,
-        epochs: int,
+        steps: int,
         max_grad_norm: Union[float, List[float]],
         batch_first: bool = True,
         loss_reduction: str = "mean",
