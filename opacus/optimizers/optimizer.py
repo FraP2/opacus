@@ -204,6 +204,7 @@ class DPOptimizer(Optimizer):
         loss_reduction: str = "mean",
         generator=None,
         secure_mode: bool = False,
+        aug_mult: int = 0,
     ):
         """
 
@@ -248,6 +249,7 @@ class DPOptimizer(Optimizer):
 
         for p in self.params:
             p.summed_grad = None
+        self.aug_mult = aug_mult
 
     def _get_flat_grad_sample(self, p: torch.Tensor):
         """
@@ -288,6 +290,23 @@ class DPOptimizer(Optimizer):
             ret = torch.cat(p.grad_sample, dim=0)
         else:
             raise ValueError(f"Unexpected grad_sample type: {type(p.grad_sample)}")
+
+
+        if self.aug_mult > 0:
+            shape = list(ret.shape)
+            #print("before anything", shape)
+            assert (shape[0] % self.aug_mult == 0)  # in case of wrong allocation (e.g. due to different available size of memory)
+            # it might happen the batch will be split in a wrong way and that will screw up everything, so crash ...
+            # it is crucial to make sure all GPUs have the same available memory so that the DDP doesn't split things in a werid way
+
+            #these asserts should not be triggered when no augmentations are used (debug only)
+            #assert (torch.allclose(ret[0], ret[self.aug_mult - 1], atol=1e-05))
+            #assert (not torch.allclose(ret[0], ret[self.aug_mult], atol=1e-05))
+            shape[0] = int(shape[0] / self.aug_mult)
+            shape.insert(1, self.aug_mult)
+            b = ret.reshape(shape)
+            b = b.mean(axis=1)
+            ret = b
 
         return ret
 
@@ -398,6 +417,7 @@ class DPOptimizer(Optimizer):
             # Empty batch
             per_sample_clip_factor = torch.zeros((0,))
         else:
+            #todo check here if modification they made still consistent with augmult
             per_param_norms = [
                 g.reshape(len(g), -1).norm(2, dim=-1) for g in self.grad_samples
             ]

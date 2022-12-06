@@ -157,6 +157,8 @@ class PrivacyEngine:
         clipping: str = "flat",
         noise_generator=None,
         grad_sample_mode="hooks",
+        aug_mult: int = 0,
+
     ) -> DPOptimizer:
         if isinstance(optimizer, DPOptimizer):
             optimizer = optimizer.original_optimizer
@@ -189,6 +191,8 @@ class PrivacyEngine:
         *,
         poisson_sampling: bool,
         distributed: bool,
+        aug_mult: int = 0,
+
     ) -> DataLoader:
         if self.dataset is None:
             self.dataset = data_loader.dataset
@@ -204,7 +208,7 @@ class PrivacyEngine:
 
         if poisson_sampling:
             return DPDataLoader.from_data_loader(
-                data_loader, generator=self.secure_rng, distributed=distributed
+                data_loader, generator=self.secure_rng, distributed=distributed, aug_mult=aug_mult
             )
         elif self.secure_mode:
             return switch_generator(data_loader=data_loader, generator=self.secure_rng)
@@ -321,6 +325,10 @@ class PrivacyEngine:
         clipping: str = "flat",
         noise_generator=None,
         grad_sample_mode: str = "hooks",
+        aug_mult: int = 0,
+        batch_size: int = 0,
+        split: float = 0
+
     ) -> Tuple[GradSampleModule, DPOptimizer, DataLoader]:
         """
         Add privacy-related responsibilities to the main PyTorch training objects:
@@ -406,11 +414,25 @@ class PrivacyEngine:
             module.register_backward_hook(forbid_accumulation_hook)
 
         data_loader = self._prepare_data_loader(
-            data_loader, distributed=distributed, poisson_sampling=poisson_sampling
+            data_loader, distributed=distributed, poisson_sampling=poisson_sampling, aug_mult=aug_mult
         )
 
-        sample_rate = 1 / len(data_loader)
-        expected_batch_size = int(len(data_loader.dataset) * sample_rate)
+        if aug_mult > 0:
+            total_batch_size = batch_size  # including augmult, assume this has been passed as argument inclusive of augmult
+            effective_batch_size = batch_size // aug_mult  # not including augmult
+        else:
+            total_batch_size = batch_size
+            effective_batch_size = batch_size
+
+        train_size = len(data_loader.dataset)
+        #if there is a cross-validation split, account for it
+        if split > 0:
+            sample_rate = effective_batch_size / int(train_size * split)
+        else:
+            sample_rate = effective_batch_size / int(
+                train_size)  # remark, this will overestimate the epsilon #1 / len(data_loader)
+
+        expected_batch_size = effective_batch_size  # total_batch_size # equivalent to int(len(data_loader.dataset) * sample_rate)
 
         # expected_batch_size is the *per worker* batch size
         if distributed:
@@ -427,6 +449,7 @@ class PrivacyEngine:
             distributed=distributed,
             clipping=clipping,
             grad_sample_mode=grad_sample_mode,
+            aug_mult=aug_mult
         )
 
         optimizer.attach_step_hook(
@@ -451,7 +474,10 @@ class PrivacyEngine:
         clipping: str = "flat",
         noise_generator=None,
         grad_sample_mode: str = "hooks",
-        **kwargs,
+            aug_mult=0,
+            batch_size=0,
+            split=0,
+            **kwargs,
     ):
         """
         Version of :meth:`~opacus.privacy_engine.PrivacyEngine.make_private`,
@@ -529,6 +555,9 @@ class PrivacyEngine:
             grad_sample_mode=grad_sample_mode,
             poisson_sampling=poisson_sampling,
             clipping=clipping,
+            aug_mult=aug_mult,
+            batch_size=batch_size,
+            split=split,
         )
 
     def get_epsilon(self, delta):

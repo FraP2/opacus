@@ -83,6 +83,8 @@ class DistributedUniformWithReplacementSampler(Sampler):
         shuffle: bool = True,
         shuffle_seed: int = 0,
         generator=None,
+        aug_mult=0,
+
     ):
         """
 
@@ -118,6 +120,7 @@ class DistributedUniformWithReplacementSampler(Sampler):
 
         # Number of batches: same as non-distributed Poisson sampling, but each batch is smaller
         self.num_batches = int(1 / self.sample_rate)
+        self.aug_mult = aug_mult
 
     def __iter__(self):
         if self.shuffle:
@@ -142,7 +145,12 @@ class DistributedUniformWithReplacementSampler(Sampler):
             )
             selected_examples = mask.nonzero(as_tuple=False).reshape(-1)
             if len(selected_examples) > 0:
-                yield indices[selected_examples]
+                result_idx = None
+                if self.aug_mult > 0:
+                    result_idx =  indices[selected_examples].repeat_interleave(self.aug_mult)
+                else:
+                    result_idx =  indices[selected_examples]
+                yield result_idx
 
     def __len__(self) -> int:
         """
