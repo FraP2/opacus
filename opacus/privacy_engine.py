@@ -527,7 +527,31 @@ class PrivacyEngine:
                 equivalent to the original data loader, possibly with updated
                 sampling mechanism. Points to the same dataset object.
         """
-        sample_rate = 1 / len(data_loader)
+        if aug_mult > 0:
+            total_batch_size = batch_size  #including augmult, assume this has been passed as argument inclusive of augmult
+            effective_batch_size = batch_size // aug_mult #not including augmult
+        #sample_rate = 1 / len(data_loader)
+        else:
+            total_batch_size = batch_size
+            effective_batch_size = batch_size
+
+        #reminder: they tune sigma on the val size, so use that one for the computation of sigma
+        #REMARK: the train set size is required both to compute the epochs and the sample rate
+        #HOWEVER: the actual number of epochs for training is NOT determined by the reduced training size
+
+        total_batch_size = effective_batch_size
+        if split > 0:
+            train_split_size = int(split * len(data_loader.dataset))
+        else:
+            train_split_size = int(len(data_loader.dataset))
+        sample_rate = total_batch_size / train_split_size
+        epochs = int(steps * total_batch_size / train_split_size)
+
+        print("Total batch size ", total_batch_size)
+        print("Effective batch size ", effective_batch_size)
+        print("Train split size ", train_split_size)
+        print("Sample rate ", sample_rate)
+        print("Number of epochs for the purpose of computing sigma ", epochs)
 
         if len(self.accountant) > 0:
             warnings.warn(
@@ -536,18 +560,21 @@ class PrivacyEngine:
                 "so your overall privacy budget will be higher."
             )
 
+        noise_multiplier=get_noise_multiplier(
+            target_epsilon=target_epsilon,
+            target_delta=target_delta,
+            sample_rate=sample_rate,
+            epochs=epochs,
+            accountant=self.accountant.mechanism(),
+            **kwargs,
+        )
+        print("Noise sigma: ", noise_multiplier)
+
         return self.make_private(
             module=module,
             optimizer=optimizer,
             data_loader=data_loader,
-            noise_multiplier=get_noise_multiplier(
-                target_epsilon=target_epsilon,
-                target_delta=target_delta,
-                sample_rate=sample_rate,
-                epochs=epochs,
-                accountant=self.accountant.mechanism(),
-                **kwargs,
-            ),
+            noise_multiplier=noise_multiplier,
             max_grad_norm=max_grad_norm,
             batch_first=batch_first,
             loss_reduction=loss_reduction,
